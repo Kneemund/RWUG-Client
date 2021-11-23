@@ -230,7 +230,7 @@ int main(int argc, char **argv) {
         sendto(udp_socket, buffer, strlen(buffer), 0, (const struct sockaddr*) &connect_addr, sizeof(connect_addr));
 
         gettimeofday(&current_time, NULL);
-        poll_dsu(&udp_socket, current_time.tv_sec * 1000000 + current_time.tv_usec, vpad_data.accelorometer.acc.x, vpad_data.accelorometer.acc.y, vpad_data.accelorometer.acc.z, vpad_data.gyro.x, vpad_data.gyro.y, vpad_data.gyro.z);
+        update_dsu(&udp_socket, current_time.tv_sec * 1000000 + current_time.tv_usec, &vpad_data);
     }
 
 

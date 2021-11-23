@@ -1,8 +1,12 @@
+#include <sys/select.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <string.h>
-#include <unistd.h>
 #include <stdio.h>
+
+#include <vpad/input.h>
 #include <zlib.h>
 
-void poll_dsu(int* socket, uint64_t timestamp, float accellerometerX, float accellerometerY, float accellerometerZ, float gyroscopePit, float gyroscopeYaw, float gyroscopeRol);
+#include "byte_swap.h"
+
+void update_dsu(int* socket, uint64_t timestamp, VPADStatus* pad);
