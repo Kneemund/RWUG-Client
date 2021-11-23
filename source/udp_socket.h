@@ -2,5 +2,5 @@
 #include <string.h>
 #include <unistd.h>
 
-int init_udp_socket(const char* ip_string, uint16_t port);
+int init_udp_socket(const uint16_t bind_port);
 void destroy_udp_socket(int* udp_socket);

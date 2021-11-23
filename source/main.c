@@ -107,7 +107,6 @@ int main(int argc, char **argv) {
     sprintf(configuration_path, "%s/wiiu/apps/RWUG/configuration.ini", WHBGetSdCardMountPath());
 
     OSScreenInit();
-    dsu_init();
 
     const uint32_t screenBufferSizeTV = OSScreenGetBufferSizeEx(SCREEN_TV);
     const uint32_t screenBufferSizeDRC = OSScreenGetBufferSizeEx(SCREEN_DRC);
@@ -145,7 +144,7 @@ int main(int argc, char **argv) {
         OSScreenClearBufferEx(SCREEN_DRC, 0x00000000);
 
         print_header(SCREEN_DRC);
-        OSScreenPutFontEx(SCREEN_DRC, 0, 7, "Enter the IP address of the RWUP server below.");
+        OSScreenPutFontEx(SCREEN_DRC, 0, 7, "Enter the IP address of the RWUG server below.");
         OSScreenPutFontEx(SCREEN_DRC, 0, 8, "Use the D-Pad or sticks to adjust the selection and its value.");
 
         sprintf(ip_print_buffer, "%3d.%3d.%3d.%3d", raw_ip_address[0], raw_ip_address[1], raw_ip_address[2], raw_ip_address[3]);
@@ -184,24 +183,7 @@ int main(int argc, char **argv) {
     char ip_address[16];
     sprintf(ip_address, "%d.%d.%d.%d", raw_ip_address[0], raw_ip_address[1], raw_ip_address[2], raw_ip_address[3]);
 
-    int udp_socket = init_udp_socket(ip_address, PORT);
-
-
-
-    // FIXME: clean this up
-
-    int dsu_udp_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-
-    struct sockaddr_in bind_addr;
-    memset(&bind_addr, 0, sizeof(bind_addr));
-
-    bind_addr.sin_family = AF_INET;
-    bind_addr.sin_port = htons(DSU_PORT);
-    bind_addr.sin_addr.s_addr = INADDR_ANY;
-
-    bind(dsu_udp_socket, (const struct sockaddr*) &bind_addr, sizeof(bind_addr));
-
-
+    int udp_socket = init_udp_socket(DSU_PORT);
 
     char sending_string[64];
     sprintf(sending_string, "Sending UDP packets to %s:%d.", ip_address, PORT);
@@ -234,23 +216,25 @@ int main(int argc, char **argv) {
     char buffer[1024];
     struct timeval current_time;
 
+    struct sockaddr_in connect_addr;
+    memset(&connect_addr, 0, sizeof(connect_addr));
+
+    connect_addr.sin_family = AF_INET;
+    connect_addr.sin_port = htons(PORT);
+    inet_aton(ip_address, &connect_addr.sin_addr);
+
     while (WHBProcIsRunning()) {
         VPADRead(VPAD_CHAN_0, &vpad_data, 1, NULL);
 
         pack_gamepad_data(&vpad_data, buffer, 1024);
-        send(udp_socket, buffer, strlen(buffer), 0);
+        sendto(udp_socket, buffer, strlen(buffer), 0, (const struct sockaddr*) &connect_addr, sizeof(connect_addr));
 
         gettimeofday(&current_time, NULL);
-        poll_dsu(&dsu_udp_socket, current_time.tv_sec * 1000000 + current_time.tv_usec, vpad_data.accelorometer.acc.x, vpad_data.accelorometer.acc.y, vpad_data.accelorometer.acc.z, vpad_data.gyro.x, vpad_data.gyro.y, vpad_data.gyro.z);
-
-        // WHBLogConsoleDraw();
-
-        usleep(10000);
+        poll_dsu(&udp_socket, current_time.tv_sec * 1000000 + current_time.tv_usec, vpad_data.accelorometer.acc.x, vpad_data.accelorometer.acc.y, vpad_data.accelorometer.acc.z, vpad_data.gyro.x, vpad_data.gyro.y, vpad_data.gyro.z);
     }
 
 
     // cleanup
-    destroy_udp_socket(&dsu_udp_socket);
     destroy_udp_socket(&udp_socket);
 
     OSScreenShutdown();

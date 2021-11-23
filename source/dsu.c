@@ -6,8 +6,6 @@
 #define PACKET_TYPE_CONTROLLER_INFORMATION 0x100001
 #define PACKET_TYPE_CONTROLLER_DATA 0x100002
 
-static uint32_t(*zlib_crc32) (uint32_t crc32, const void *buffer, int buffer_size) = NULL;
-
 void set_packet_header(uint8_t* packet, uint8_t packet_length) {
     // Magic string — DSUS if it’s message by server (you), DSUC if by client (cemuhook).
     packet[0]  = (uint8_t) 'D';
@@ -47,7 +45,7 @@ uint8_t encode_protocol_information(uint8_t* output) {
     output[20] = (PROTOCOL_VERSION     ) & 0xFF;
     output[21] = (PROTOCOL_VERSION >> 8) & 0xFF;
 
-    uint32_t checksum = zlib_crc32(0, (const void*) output, 22);
+    uint32_t checksum = crc32(0L, (const void*) output, 22);
     memcpy(&output[8], &checksum, sizeof(checksum));
 
     return 22;
@@ -81,7 +79,7 @@ uint8_t encode_controller_information(uint8_t* output) {
     output[31] = 0x00;
 
 
-    uint32_t checksum = zlib_crc32(0, (const void*) output, 32);
+    uint32_t checksum = crc32(0L, (const void*) output, 32);
     memcpy(&output[8], &checksum, sizeof(checksum));
 
     return 32;
@@ -115,7 +113,7 @@ uint8_t encode_empty_controller_information(uint8_t* output, uint8_t slot) {
     output[31] = 0x00;
 
 
-    uint32_t checksum = zlib_crc32(0, (const void*) output, 32);
+    uint32_t checksum = crc32(0L, (const void*) output, 32);
     memcpy(&output[8], &checksum, sizeof(checksum));
 
     return 32;
@@ -154,7 +152,7 @@ uint8_t encode_empty_controller_data(uint8_t* output, uint32_t packet_count, uin
     // Fill packet with 0x00.
     memset(&output[36], 0, 64);
 
-    uint32_t checksum = zlib_crc32(0, (const void*) output, 100);
+    uint32_t checksum = crc32(0L, (const void*) output, 100);
     memcpy(&output[8], &checksum, sizeof(checksum));
 
     return 100;
@@ -241,16 +239,10 @@ uint8_t encode_controller_data(uint8_t* output, uint32_t packet_count, uint64_t 
     memcpy(&output[92], &gyroscopeYaw, sizeof(gyroscopeYaw));
     memcpy(&output[96], &gyroscopeRol, sizeof(gyroscopeRol));
 
-    uint32_t checksum = zlib_crc32(0, (const void*) output, 100);
+    uint32_t checksum = crc32(0L, (const void*) output, 100);
     memcpy(&output[8], &checksum, sizeof(checksum));
 
     return 100;
-}
-
-void dsu_init() {
-    uint32_t zlib_handle = 0;
-    OSDynLoad_Acquire("zlib125.rpl", &zlib_handle);
-	OSDynLoad_FindExport(zlib_handle, 0, "crc32", &zlib_crc32);
 }
 
 uint8_t incoming_packet[28];
@@ -261,7 +253,7 @@ uint8_t packet_number = 0;
 uint8_t requested_slots[4];
 
 fd_set read_fd;
-struct timeval timeout = { 0, 500000 };
+struct timeval timeout = { 0, 10000 };
 
 struct sockaddr_in sender;
 socklen_t sender_size = sizeof(sender);
@@ -278,7 +270,7 @@ void poll_dsu(int* socket, uint64_t timestamp, float accellerometerX, float acce
                 // Protocol Information Request
                 case 0x00:
                     packet_size = encode_protocol_information(&packet[0]);
-                    sendto(*socket, packet, packet_size, 0, (struct sockaddr*) &sender, sender_size);
+                    sendto(*socket, packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
                 break;
 
                 // Controller Information Request
@@ -289,7 +281,7 @@ void poll_dsu(int* socket, uint64_t timestamp, float accellerometerX, float acce
 
                         if (slot == 0) packet_size = encode_controller_information(&packet[0]);
                         else packet_size = encode_empty_controller_information(&packet[0], slot);
-                        sendto(*socket, packet, packet_size, 0, (struct sockaddr*) &sender, sender_size);
+                        sendto(*socket, packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
                     }
 
                 break;
@@ -325,7 +317,7 @@ void poll_dsu(int* socket, uint64_t timestamp, float accellerometerX, float acce
         if (i == 0) packet_size = encode_controller_data(&packet[0], packet_number, timestamp, accellerometerX, accellerometerY, accellerometerZ, gyroscopePit, gyroscopeYaw, gyroscopeRol);
         else packet_size = encode_empty_controller_data(&packet[0], packet_number, i);
 
-        sendto(*socket, packet, packet_size, 0, (struct sockaddr*) &sender, sender_size);
+        sendto(*socket, packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
         ++packet_number;
     }
 }

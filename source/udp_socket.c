@@ -1,17 +1,17 @@
 #include "udp_socket.h"
 
-int init_udp_socket(const char* ip_string, uint16_t port) {
-    int udp_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+int init_udp_socket(const uint16_t bind_port) {
+    int udp_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (udp_socket < 0) return -1;
 
-    struct sockaddr_in connect_addr;
-    memset(&connect_addr, 0, sizeof(connect_addr));
+    struct sockaddr_in bind_addr;
+    memset(&bind_addr, 0, sizeof(bind_addr));
 
-    connect_addr.sin_family = AF_INET;
-    connect_addr.sin_port = htons(port);
-    inet_aton(ip_string, &connect_addr.sin_addr);
+    bind_addr.sin_family = AF_INET;
+    bind_addr.sin_port = htons(bind_port);
+    bind_addr.sin_addr.s_addr = INADDR_ANY;
 
-    if (connect(udp_socket, (struct sockaddr*) &connect_addr, sizeof(connect_addr)) < 0) {
+    if (bind(udp_socket, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) < 0) {
         close(udp_socket);
         return -1;
     }
