@@ -4,4 +4,4 @@
 #define bswap64u(x) __builtin_bswap64(x)
 
 float bswap32f(const float x);
-float bswap64f(const float x);
+double bswap64f(const double x);

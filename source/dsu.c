@@ -2,9 +2,13 @@
 
 // This DSU implementation doesn't fully follow the specifications for the sake of efficiency.
 // If this causes any issues with DSU clients, we should send information about all requested controllers
-// and properly handle data requests as the specification suggests.
+// and properly handle data requests as the specification suggests. Incoming requests are not fully validated.
 
 #define DATA_REQUEST_TIMEOUT 30000000
+#define DATA_UPDATE_RATE 10000
+
+#define INCOMING_BUFFER_SIZE 28
+#define OUTGOING_BUFFER_SIZE 100
 
 #define PROTOCOL_VERSION 1001
 
@@ -65,7 +69,7 @@ uint8_t pack_controller_information(uint8_t* packet) {
     packet[20] = 0x00; // Slot you’re reporting about. Must be the same as byte value you read. (0 / GamePad)
     packet[21] = 0x02; // Slot state: 0 if not connected, 1 if reserved (?), 2 if connected. (2 / connected)
     packet[22] = 0x02; // Device model: 0 if not applicable, 1 if no or partial gyro 2 for full gyro. (2 / full gyro)
-    packet[23] = 0x02; // Connection type: 0 if not applicable, 1 for USB, 2 for bluetooth. (2 / bluetooth)
+    packet[23] = 0x01; // Connection type: 0 if not applicable, 1 for USB, 2 for bluetooth. (1 / USB)
 
     // MAC address of device. It’s used to detect same device between launches. Zero out if not applicable. (0x000000000001)
     packet[24] = 0x01;
@@ -85,35 +89,6 @@ uint8_t pack_controller_information(uint8_t* packet) {
     return 32;
 }
 
-uint8_t pack_empty_controller_information(uint8_t* packet, uint8_t slot) {
-    packet[16] = (PACKET_TYPE_CONTROLLER_INFORMATION      ) & 0xFF;
-    packet[17] = (PACKET_TYPE_CONTROLLER_INFORMATION >> 8 ) & 0xFF;
-    packet[18] = (PACKET_TYPE_CONTROLLER_INFORMATION >> 16) & 0xFF;
-    packet[19] = (PACKET_TYPE_CONTROLLER_INFORMATION >> 24) & 0xFF;
-
-    packet[20] = slot; // Slot you’re reporting about. Must be the same as byte value you read.
-    packet[21] = 0x00; // Slot state: 0 if not connected, 1 if reserved (?), 2 if connected. (0 / not connected)
-    packet[22] = 0x00; // Device model: 0 if not applicable, 1 if no or partial gyro 2 for full gyro. (0 / not applicable)
-    packet[23] = 0x00; // Connection type: 0 if not applicable, 1 for USB, 2 for bluetooth. (0 / not applicable)
-
-    // MAC address of device. It’s used to detect same device between launches. Zero out if not applicable. (not applicable)
-    packet[24] = 0x00;
-    packet[25] = 0x00;
-    packet[26] = 0x00;
-    packet[27] = 0x00;
-    packet[28] = 0x00;
-    packet[29] = 0x00;
-
-    // Batery status. (0x00 / not applicable)
-    packet[30] = 0x00;
-
-    // Termination byte.
-    packet[31] = 0x00;
-
-    set_packet_header(packet, 32);
-    return 32;
-}
-
 uint8_t pack_controller_data(uint8_t* packet, uint32_t packet_count, uint64_t timestamp, float accelerometerX, float accelerometerY, float accelerometerZ, float gyroscopePit, float gyroscopeYaw, float gyroscopeRol) {
     packet[16] = (PACKET_TYPE_CONTROLLER_DATA      ) & 0xFF;
     packet[17] = (PACKET_TYPE_CONTROLLER_DATA >> 8 ) & 0xFF;
@@ -123,7 +98,7 @@ uint8_t pack_controller_data(uint8_t* packet, uint32_t packet_count, uint64_t ti
     packet[20] = 0x00; // Slot you’re reporting about. Must be the same as byte value you read. (0 / GamePad)
     packet[21] = 0x02; // Slot state: 0 if not connected, 1 if reserved (?), 2 if connected. (2 / connected)
     packet[22] = 0x02; // Device model: 0 if not applicable, 1 if no or partial gyro 2 for full gyro. (2 / full gyro)
-    packet[23] = 0x02; // Connection type: 0 if not applicable, 1 for USB, 2 for bluetooth. (2 / bluetooth)
+    packet[23] = 0x01; // Connection type: 0 if not applicable, 1 for USB, 2 for bluetooth. (2 / USB)
 
     // MAC address of device. It’s used to detect same device between launches. Zero out if not applicable. (0x000000000001)
     packet[24] = 0x01;
@@ -196,13 +171,13 @@ uint8_t pack_controller_data(uint8_t* packet, uint32_t packet_count, uint64_t ti
     return 100;
 }
 
-uint8_t incoming_packet[28];
-uint8_t outgoing_packet[100];
+uint8_t incoming_packet[INCOMING_BUFFER_SIZE];
+uint8_t outgoing_packet[OUTGOING_BUFFER_SIZE];
 
 uint64_t last_data_requested = 0;
 uint32_t outgoing_packet_count = 0;
 
-struct timeval timeout = { 0, 10000 };
+struct timeval timeout = { 0, DATA_UPDATE_RATE };
 
 struct sockaddr_in sender;
 socklen_t sender_size = sizeof(sender);
@@ -213,48 +188,30 @@ void update_dsu(int* socket, uint64_t timestamp, VPADStatus* pad) {
     FD_SET(*socket, &read_fd);
 
     if (select(*socket + 1, &read_fd, NULL, NULL, &timeout) > 0) {
-        ssize_t request_length = recvfrom(*socket, incoming_packet, 28, 0x100, (struct sockaddr*) &sender, &sender_size);
+        ssize_t request_length = recvfrom(*socket, incoming_packet, INCOMING_BUFFER_SIZE, 0x100, (struct sockaddr*) &sender, &sender_size);
 
-        if (request_length > 0) {
+        // must be longer than header (> 16) and sent by client (DSUC)
+        if (request_length > 16 && strncmp((const char*) incoming_packet, "DSUC", 4) == 0) {
             switch (incoming_packet[16]) {
                 // Protocol Information Request
-                case 0x00:
+                case 0x00: {
                     uint8_t packet_size = pack_protocol_information(outgoing_packet);
                     sendto(*socket, outgoing_packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
-                break;
+                    break;
+                }
 
                 // Controller Information Request
-                case 0x01:
-                    // TODO: do we have to send information about controllers that don't exist?
-                    uint8_t slot_count = incoming_packet[20];
-                    for (uint8_t i = 0; i < slot_count; ++i) {
-                        uint8_t slot = incoming_packet[24 + i];
-
-                        uint8_t packet_size = slot == 0 ? pack_controller_information(outgoing_packet) : pack_empty_controller_information(outgoing_packet, slot);
-                        sendto(*socket, outgoing_packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
-                    }
-                break;
+                case 0x01: {
+                    uint8_t packet_size = pack_controller_information(outgoing_packet);
+                    sendto(*socket, outgoing_packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
+                    break;
+                }
 
                 // Controller Data Request
-                case 0x02:
+                case 0x02: {
                     last_data_requested = timestamp;
-
-                    // all controllers
-                    // if (incoming_packet[20] == 0x00) {
-
-                    // }
-
-                    // controller by slot
-                    // if (incoming_packet[20] & 0x01) {
-                    //     uint8_t slot = incoming_packet[21];
-
-                    // }
-
-                    // controller by mac
-                    // if (incoming_packet[20] & 0x02) {
-
-                    // }
-                break;
+                    break;
+                }
             }
         }
     }
@@ -268,7 +225,7 @@ void update_dsu(int* socket, uint64_t timestamp, VPADStatus* pad) {
         float gyroscopeYaw   = bswap32f(-pad->gyro.y * 360.0);
         float gyroscopeRoll  = bswap32f( pad->gyro.z * 360.0);
 
-        uint8_t packet_size = pack_controller_data(outgoing_packet, bswap32u(outgoing_packet_count), timestamp, accelerometerX, accelerometerY, accelerometerZ, gyroscopePitch, gyroscopeYaw, gyroscopeRoll);
+        uint8_t packet_size = pack_controller_data(outgoing_packet, bswap32u(outgoing_packet_count), bswap64u(timestamp), accelerometerX, accelerometerY, accelerometerZ, gyroscopePitch, gyroscopeYaw, gyroscopeRoll);
         sendto(*socket, outgoing_packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
         ++outgoing_packet_count;
     }

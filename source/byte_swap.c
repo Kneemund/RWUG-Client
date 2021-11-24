@@ -12,14 +12,14 @@ float bswap32f(const float x) {
     return swapper.floatValue;
 }
 
-float bswap64f(const float x) {
+double bswap64f(const double x) {
     union {
-        float floatValue;
+        double doubleValue;
         uint64_t byteValue;
     } swapper;
 
-    swapper.floatValue = x;
+    swapper.doubleValue = x;
     swapper.byteValue = __builtin_bswap64(swapper.byteValue);
 
-    return swapper.floatValue;
+    return swapper.doubleValue;
 }

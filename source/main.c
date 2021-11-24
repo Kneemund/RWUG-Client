@@ -1,7 +1,5 @@
 #include <whb/proc.h>
 #include <whb/sdcard.h>
-// #include <whb/log_console.h>
-// #include <whb/log.h>
 #include <coreinit/screen.h>
 #include <coreinit/cache.h>
 #include <vpad/input.h>
@@ -19,8 +17,9 @@
 #include "udp_socket.h"
 #include "dsu.h"
 
-#define PORT 4242
 #define DSU_PORT 26760
+#define RWUG_PORT 4242
+#define RWUG_BUFFER_SIZE 512
 
 typedef struct {
     const char* ip_address;
@@ -43,10 +42,10 @@ static int configuration_handler(void* out, const char* section, const char* nam
 }
 
 void print_header(OSScreenID buffer) {
-    OSScreenPutFontEx(buffer, 17, 1, "   _____      ___   _  ___ ");
-    OSScreenPutFontEx(buffer, 17, 2, "  | _ \\ \\    / / | | |/ __|");
-    OSScreenPutFontEx(buffer, 17, 3, "  |   /\\ \\/\\/ /| |_| | (_ |");
-    OSScreenPutFontEx(buffer, 17, 4, "  |_|_\\ \\_/\\_/  \\___/ \\___|");
+    OSScreenPutFontEx(buffer, 19, 1, " _____      ___   _  ___ ");
+    OSScreenPutFontEx(buffer, 19, 2, "| _ \\ \\    / / | | |/ __|");
+    OSScreenPutFontEx(buffer, 19, 3, "|   /\\ \\/\\/ /| |_| | (_ |");
+    OSScreenPutFontEx(buffer, 19, 4, "|_|_\\ \\_/\\_/  \\___/ \\___|");
 }
 
 void reset_gyro_orientation() {
@@ -186,7 +185,7 @@ int main(int argc, char **argv) {
     int udp_socket = init_udp_socket(DSU_PORT);
 
     char sending_string[64];
-    sprintf(sending_string, "Sending UDP packets to %s:%d.", ip_address, PORT);
+    sprintf(sending_string, "Sending UDP packets to %s:%d.", ip_address, RWUG_PORT);
 
     OSScreenClearBufferEx(SCREEN_TV, 0x00000000);
     OSScreenClearBufferEx(SCREEN_DRC, 0x00000000);
@@ -209,24 +208,22 @@ int main(int argc, char **argv) {
         fclose(configuration_file);
     }
 
-    // WHBLogConsoleInit();
-
 
     // main loop
-    char buffer[1024];
+    char buffer[RWUG_BUFFER_SIZE];
     struct timeval current_time;
 
     struct sockaddr_in connect_addr;
     memset(&connect_addr, 0, sizeof(connect_addr));
 
     connect_addr.sin_family = AF_INET;
-    connect_addr.sin_port = htons(PORT);
-    inet_aton(ip_address, &connect_addr.sin_addr);
+    connect_addr.sin_port = htons(RWUG_PORT);
+    inet_pton(AF_INET, ip_address, &connect_addr.sin_addr);
 
     while (WHBProcIsRunning()) {
         VPADRead(VPAD_CHAN_0, &vpad_data, 1, NULL);
 
-        pack_gamepad_data(&vpad_data, buffer, 1024);
+        pack_gamepad_data(&vpad_data, buffer, RWUG_BUFFER_SIZE);
         sendto(udp_socket, buffer, strlen(buffer), 0, (const struct sockaddr*) &connect_addr, sizeof(connect_addr));
 
         gettimeofday(&current_time, NULL);
@@ -243,7 +240,6 @@ int main(int argc, char **argv) {
 
     WHBUnmountSdCard();
     VPADShutdown();
-    // WHBLogConsoleFree();
     WHBProcShutdown();
 
     return 0;
