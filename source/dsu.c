@@ -1,5 +1,10 @@
 #include "dsu.h"
 
+#include <sys/select.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <zlib.h>
+
 // This DSU implementation doesn't fully follow the specifications for the sake of efficiency.
 // If this causes any issues with DSU clients, we should send information about all requested controllers
 // and properly handle data requests as the specification suggests. Incoming requests are not fully validated.
@@ -89,7 +94,7 @@ uint8_t pack_controller_information(uint8_t* packet) {
     return 32;
 }
 
-uint8_t pack_controller_data(uint8_t* packet, uint32_t packet_count, uint64_t timestamp, float accelerometerX, float accelerometerY, float accelerometerZ, float gyroscopePit, float gyroscopeYaw, float gyroscopeRol) {
+uint8_t pack_controller_data(uint8_t* packet, uint32_t packet_count, uint64_t timestamp, float accelerometerX, float accelerometerY, float accelerometerZ, float gyroscopePitch, float gyroscopeYaw, float gyroscopeRoll, uint8_t touchpadActive, uint16_t touchpadX, uint16_t touchpadY, VPADStatus* pad) {
     packet[16] = (PACKET_TYPE_CONTROLLER_DATA      ) & 0xFF;
     packet[17] = (PACKET_TYPE_CONTROLLER_DATA >> 8 ) & 0xFF;
     packet[18] = (PACKET_TYPE_CONTROLLER_DATA >> 16) & 0xFF;
@@ -117,34 +122,64 @@ uint8_t pack_controller_data(uint8_t* packet, uint32_t packet_count, uint64_t ti
     // Packet number (for this client).
     memcpy(&packet[32], &packet_count, sizeof(packet_count));
 
-    packet[36] = 0x00; // D-Pad Left, D-Pad Down, D-Pad Right, D-Pad Up, Options (?), R3, L3, Share (?)
-    packet[37] = 0x00; // Y, B, A, X, R1, L1, R2, L2
+    uint8_t button_left  = (pad->hold & VPAD_BUTTON_LEFT)  != 0;
+    uint8_t button_down  = (pad->hold & VPAD_BUTTON_DOWN)  != 0;
+    uint8_t button_right = (pad->hold & VPAD_BUTTON_RIGHT) != 0;
+    uint8_t button_up    = (pad->hold & VPAD_BUTTON_UP)    != 0;
+    uint8_t button_y     = (pad->hold & VPAD_BUTTON_Y)     != 0;
+    uint8_t button_b     = (pad->hold & VPAD_BUTTON_B)     != 0;
+    uint8_t button_a     = (pad->hold & VPAD_BUTTON_A)     != 0;
+    uint8_t button_x     = (pad->hold & VPAD_BUTTON_X)     != 0;
+    uint8_t button_r     = (pad->hold & VPAD_BUTTON_R)     != 0;
+    uint8_t button_l     = (pad->hold & VPAD_BUTTON_L)     != 0;
+    uint8_t button_zr    = (pad->hold & VPAD_BUTTON_ZR)    != 0;
+    uint8_t button_zl    = (pad->hold & VPAD_BUTTON_ZL)    != 0;
+
+    packet[36] = button_left  << 7 |
+                 button_down  << 6 |
+                 button_right << 5 |
+                 button_up    << 4 |
+                 ((uint8_t) ((pad->hold & VPAD_BUTTON_PLUS)    != 0)) << 3 |
+                 ((uint8_t) ((pad->hold & VPAD_BUTTON_STICK_R) != 0)) << 2 |
+                 ((uint8_t) ((pad->hold & VPAD_BUTTON_STICK_L) != 0)) << 1 |
+                 ((uint8_t) ((pad->hold & VPAD_BUTTON_MINUS)   != 0));
+
+    packet[37] = button_y  << 7 |
+                 button_b  << 6 |
+                 button_a  << 5 |
+                 button_x  << 4 |
+                 button_r  << 3 |
+                 button_l  << 2 |
+                 button_zr << 1 |
+                 button_zl;
+
     packet[38] = 0x00; // PS Button (unused)
     packet[39] = 0x00; // Touch Button (unused)
-    packet[40] = 0x00; // Left stick X (plus rightward)
-    packet[41] = 0x00; // Left stick Y (plus upward)
-    packet[42] = 0x00; // Right stick X (plus rightward)
-    packet[43] = 0x00; // Right stick Y (plus upward)
-    packet[44] = 0x00; // Analog D-Pad Left
-    packet[45] = 0x00; // Analog D-Pad Down
-    packet[46] = 0x00; // Analog D-Pad Right
-    packet[47] = 0x00; // Analog D-Pad Up
-    packet[48] = 0x00; // Analog Y
-    packet[49] = 0x00; // Analog B
-    packet[50] = 0x00; // Analog A
-    packet[51] = 0x00; // Analog X
-    packet[52] = 0x00; // Analog R1
-    packet[53] = 0x00; // Analog L1
-    packet[54] = 0x00; // Analog R2
-    packet[55] = 0x00; // Analog L2
+
+    // The neutral value is 127.
+    packet[40] = (uint8_t) (pad->leftStick.x  * 128 + 127); // Left stick X (plus rightward)
+    packet[41] = (uint8_t) (pad->leftStick.y  * 128 + 127); // Left stick Y (plus upward)
+    packet[42] = (uint8_t) (pad->rightStick.x * 128 + 127); // Right stick X (plus rightward)
+    packet[43] = (uint8_t) (pad->rightStick.y * 128 + 127); // Right stick Y (plus upward)
+
+    packet[44] = button_left  * 255; // Analog D-Pad Left
+    packet[45] = button_down  * 255; // Analog D-Pad Down
+    packet[46] = button_right * 255; // Analog D-Pad Right
+    packet[47] = button_up    * 255; // Analog D-Pad Up
+    packet[48] = button_y     * 255; // Analog Y
+    packet[49] = button_b     * 255; // Analog B
+    packet[50] = button_a     * 255; // Analog A
+    packet[51] = button_x     * 255; // Analog X
+    packet[52] = button_r     * 255; // Analog R1
+    packet[53] = button_l     * 255; // Analog L1
+    packet[54] = button_zr    * 255; // Analog R2
+    packet[55] = button_zl    * 255; // Analog L2
 
     // First touch.
-    packet[56] = 0x00; // Active
-    packet[57] = 0x00; // ID
-    packet[58] = 0x00; // X (2 bytes)
-    packet[59] = 0x00;
-    packet[60] = 0x00; // Y (2 bytes)
-    packet[61] = 0x00;
+    packet[56] = touchpadActive; // Active
+    packet[57] = touchpadActive; // ID
+    memcpy(&packet[58], &touchpadX, sizeof(touchpadX)); // X (2 bytes)
+    memcpy(&packet[60], &touchpadY, sizeof(touchpadY)); // Y (2 bytes)
 
     // Second touch.
     packet[62] = 0x00; // Active
@@ -163,16 +198,13 @@ uint8_t pack_controller_data(uint8_t* packet, uint32_t packet_count, uint64_t ti
     memcpy(&packet[84], &accelerometerZ, sizeof(accelerometerZ));
 
     // Accelerometer data (4 bytes each).
-    memcpy(&packet[88], &gyroscopePit, sizeof(gyroscopePit));
+    memcpy(&packet[88], &gyroscopePitch, sizeof(gyroscopePitch));
     memcpy(&packet[92], &gyroscopeYaw, sizeof(gyroscopeYaw));
-    memcpy(&packet[96], &gyroscopeRol, sizeof(gyroscopeRol));
+    memcpy(&packet[96], &gyroscopeRoll, sizeof(gyroscopeRoll));
 
     set_packet_header(packet, 100);
     return 100;
 }
-
-uint8_t incoming_packet[INCOMING_BUFFER_SIZE];
-uint8_t outgoing_packet[OUTGOING_BUFFER_SIZE];
 
 uint64_t last_data_requested = 0;
 uint32_t outgoing_packet_count = 0;
@@ -182,15 +214,18 @@ struct timeval timeout = { 0, DATA_UPDATE_RATE };
 struct sockaddr_in sender;
 socklen_t sender_size = sizeof(sender);
 
-void update_dsu(int* socket, uint64_t timestamp, VPADStatus* pad) {
+void update_dsu(int* socket, uint64_t timestamp, VPADStatus* pad, VPADTouchData* touchpad) {
     fd_set read_fd;
+    uint8_t outgoing_packet[OUTGOING_BUFFER_SIZE];
+
     FD_ZERO(&read_fd);
     FD_SET(*socket, &read_fd);
 
     if (select(*socket + 1, &read_fd, NULL, NULL, &timeout) > 0) {
+        uint8_t incoming_packet[INCOMING_BUFFER_SIZE];
         ssize_t request_length = recvfrom(*socket, incoming_packet, INCOMING_BUFFER_SIZE, 0x100, (struct sockaddr*) &sender, &sender_size);
 
-        // must be longer than header (> 16) and sent by client (DSUC)
+        // Must be longer than header (> 16) and sent by client (DSUC).
         if (request_length > 16 && strncmp((const char*) incoming_packet, "DSUC", 4) == 0) {
             switch (incoming_packet[16]) {
                 // Protocol Information Request
@@ -225,7 +260,14 @@ void update_dsu(int* socket, uint64_t timestamp, VPADStatus* pad) {
         float gyroscopeYaw   = bswap32f(-pad->gyro.y * 360.0);
         float gyroscopeRoll  = bswap32f( pad->gyro.z * 360.0);
 
-        uint8_t packet_size = pack_controller_data(outgoing_packet, bswap32u(outgoing_packet_count), bswap64u(timestamp), accelerometerX, accelerometerY, accelerometerZ, gyroscopePitch, gyroscopeYaw, gyroscopeRoll);
+        uint8_t packet_size = pack_controller_data(
+            outgoing_packet, bswap32u(outgoing_packet_count), bswap64u(timestamp),
+            accelerometerX, accelerometerY, accelerometerZ,
+            gyroscopePitch, gyroscopeYaw, gyroscopeRoll,
+            touchpad->touched, bswap16u(touchpad->x), bswap16u(touchpad->y),
+            pad
+        );
+
         sendto(*socket, outgoing_packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
         ++outgoing_packet_count;
     }

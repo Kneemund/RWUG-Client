@@ -27,7 +27,7 @@ INCLUDES	:=	include/inih
 #-------------------------------------------------------------------------------
 # options for code generation
 #-------------------------------------------------------------------------------
-CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
+CFLAGS	:=	-g -Wall -Ofast -ffunction-sections \
 			$(MACHDEP)
 
 CFLAGS	+=	$(INCLUDE) -D__WIIU__ -D__WUT__

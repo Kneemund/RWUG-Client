@@ -1,5 +1,7 @@
 #include "byte_swap.h"
 
+#include "stdint.h"
+
 float bswap32f(const float x) {
     union {
         float floatValue;

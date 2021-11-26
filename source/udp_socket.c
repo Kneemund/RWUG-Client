@@ -1,5 +1,8 @@
 #include "udp_socket.h"
 
+#include <arpa/inet.h>
+#include <string.h>
+
 int init_udp_socket(const uint16_t bind_port) {
     int udp_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (udp_socket < 0) return -1;
