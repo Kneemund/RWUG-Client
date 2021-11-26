@@ -5,6 +5,7 @@
 #include <malloc.h>
 #include <string.h>
 #include <stdio.h>
+#include <sys/time.h>
 
 #include "configuration.h"
 #include "udp_socket.h"
