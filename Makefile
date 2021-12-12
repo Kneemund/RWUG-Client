@@ -18,7 +18,7 @@ include $(DEVKITPRO)/wut/share/wut_rules
 # DATA is a list of directories containing data files
 # INCLUDES is a list of directories containing header files
 #-------------------------------------------------------------------------------
-TARGET		:=	$(notdir $(CURDIR))
+TARGET		:=	rwug
 BUILD		:=	build
 SOURCES		:=	source include/inih
 DATA		:=	data

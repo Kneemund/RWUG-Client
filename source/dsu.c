@@ -1,6 +1,5 @@
 #include "dsu.h"
 
-#include <sys/select.h>
 #include <arpa/inet.h>
 #include <string.h>
 #include <zlib.h>
@@ -9,9 +8,11 @@
 // If this causes any issues with DSU clients, we should send information about all requested controllers
 // and properly handle data requests as the specification suggests. Incoming requests are not fully validated.
 
+// Time that can pass between data requests by the client, in nanoseconds.
+// If this time is exceeded, no more data will be sent unless new data requests are received.
 #define DATA_REQUEST_TIMEOUT 30000000
-#define DATA_UPDATE_RATE 10000
 
+// Length of the incoming and outgoing packets, in bytes. Currently set to the absolute minimum.
 #define INCOMING_BUFFER_SIZE 28
 #define OUTGOING_BUFFER_SIZE 100
 
@@ -209,44 +210,38 @@ uint8_t pack_controller_data(uint8_t* packet, uint32_t packet_count, uint64_t ti
 uint64_t last_data_requested = 0;
 uint32_t outgoing_packet_count = 0;
 
-struct timeval timeout = { 0, DATA_UPDATE_RATE };
+uint8_t outgoing_packet[OUTGOING_BUFFER_SIZE];
+uint8_t incoming_packet[INCOMING_BUFFER_SIZE];
 
 struct sockaddr_in sender;
 socklen_t sender_size = sizeof(sender);
 
 void update_dsu(int* socket, uint64_t timestamp, VPADStatus* pad, VPADTouchData* touchpad) {
-    fd_set read_fd;
-    uint8_t outgoing_packet[OUTGOING_BUFFER_SIZE];
+    // This operation is non-blocking due to MSG_DONTWAIT.
+    // request_length is < 0 if recvfrom() would block.
+    ssize_t request_length = recvfrom(*socket, incoming_packet, INCOMING_BUFFER_SIZE, MSG_DONTWAIT, (struct sockaddr*) &sender, &sender_size);
 
-    FD_ZERO(&read_fd);
-    FD_SET(*socket, &read_fd);
+    // Must be longer than header (> 16) and sent by client (DSUC).
+    if (request_length > 16 && strncmp((const char*) incoming_packet, "DSUC", 4) == 0) {
+        switch (incoming_packet[16]) {
+            // Protocol Information Request
+            case 0x00: {
+                uint8_t packet_size = pack_protocol_information(outgoing_packet);
+                sendto(*socket, outgoing_packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
+                break;
+            }
 
-    if (select(*socket + 1, &read_fd, NULL, NULL, &timeout) > 0) {
-        uint8_t incoming_packet[INCOMING_BUFFER_SIZE];
-        ssize_t request_length = recvfrom(*socket, incoming_packet, INCOMING_BUFFER_SIZE, 0x100, (struct sockaddr*) &sender, &sender_size);
+            // Controller Information Request
+            case 0x01: {
+                uint8_t packet_size = pack_controller_information(outgoing_packet);
+                sendto(*socket, outgoing_packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
+                break;
+            }
 
-        // Must be longer than header (> 16) and sent by client (DSUC).
-        if (request_length > 16 && strncmp((const char*) incoming_packet, "DSUC", 4) == 0) {
-            switch (incoming_packet[16]) {
-                // Protocol Information Request
-                case 0x00: {
-                    uint8_t packet_size = pack_protocol_information(outgoing_packet);
-                    sendto(*socket, outgoing_packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
-                    break;
-                }
-
-                // Controller Information Request
-                case 0x01: {
-                    uint8_t packet_size = pack_controller_information(outgoing_packet);
-                    sendto(*socket, outgoing_packet, packet_size, 0, (const struct sockaddr*) &sender, sender_size);
-                    break;
-                }
-
-                // Controller Data Request
-                case 0x02: {
-                    last_data_requested = timestamp;
-                    break;
-                }
+            // Controller Data Request
+            case 0x02: {
+                last_data_requested = timestamp;
+                break;
             }
         }
     }
