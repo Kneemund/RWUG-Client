@@ -82,11 +82,11 @@ int main() {
         if (pad_data.trigger & (VPAD_BUTTON_RIGHT | VPAD_STICK_L_EMULATION_RIGHT | VPAD_STICK_R_EMULATION_RIGHT) && selection < 4) ++selection;
 
         if (selection < 4) {
-            if (pad_data.trigger & (VPAD_BUTTON_UP    | VPAD_STICK_L_EMULATION_UP    | VPAD_STICK_R_EMULATION_UP   )) raw_ip_address[selection] = (raw_ip_address[selection] < 255) ? (raw_ip_address[selection] + 1) : 0;
-            if (pad_data.trigger & (VPAD_BUTTON_DOWN  | VPAD_STICK_L_EMULATION_DOWN  | VPAD_STICK_R_EMULATION_DOWN )) raw_ip_address[selection] = (raw_ip_address[selection] >   0) ? (raw_ip_address[selection] - 1) : 255;
+            if (pad_data.trigger & (VPAD_BUTTON_UP   | VPAD_STICK_L_EMULATION_UP   | VPAD_STICK_R_EMULATION_UP  )) raw_ip_address[selection] = (raw_ip_address[selection] < 255) ? (raw_ip_address[selection] + 1) : 0;
+            if (pad_data.trigger & (VPAD_BUTTON_DOWN | VPAD_STICK_L_EMULATION_DOWN | VPAD_STICK_R_EMULATION_DOWN)) raw_ip_address[selection] = (raw_ip_address[selection] >   0) ? (raw_ip_address[selection] - 1) : 255;
         } else {
-            if (pad_data.trigger & (VPAD_BUTTON_UP    | VPAD_STICK_L_EMULATION_UP    | VPAD_STICK_R_EMULATION_UP   )) mode = (mode < 2) ? (mode + 1) : 0;
-            if (pad_data.trigger & (VPAD_BUTTON_DOWN  | VPAD_STICK_L_EMULATION_DOWN  | VPAD_STICK_R_EMULATION_DOWN )) mode = (mode > 0) ? (mode - 1) : 2;
+            if (pad_data.trigger & (VPAD_BUTTON_UP   | VPAD_STICK_L_EMULATION_UP   | VPAD_STICK_R_EMULATION_UP  )) mode = (mode < 2) ? (mode + 1) : 0;
+            if (pad_data.trigger & (VPAD_BUTTON_DOWN | VPAD_STICK_L_EMULATION_DOWN | VPAD_STICK_R_EMULATION_DOWN)) mode = (mode > 0) ? (mode - 1) : 2;
         }
 
         OSScreenClearBufferEx(SCREEN_TV, 0x00000000);
@@ -134,17 +134,27 @@ int main() {
     char ip_address[16];
     sprintf(ip_address, "%d.%d.%d.%d", raw_ip_address[0], raw_ip_address[1], raw_ip_address[2], raw_ip_address[3]);
 
+    const bool enable_rwug = mode == 0 || mode == 2;
+    const bool enable_dsu  = mode == 0 || mode == 1;
+
     int udp_socket = init_udp_socket(DSU_PORT);
 
     OSScreenClearBufferEx(SCREEN_TV, 0x00000000);
     OSScreenClearBufferEx(SCREEN_DRC, 0x00000000);
 
     print_header(SCREEN_DRC);
+
+    uint8_t line = 9;
     char sending_string[64];
-    sprintf(sending_string, "Sending UDP packets to %s:%d.", ip_address, RWUG_PORT);
-    OSScreenPutFontEx(SCREEN_DRC, 0, 9, sending_string);
-    sprintf(sending_string, "Listening to DSU requests on %d.", DSU_PORT);
-    OSScreenPutFontEx(SCREEN_DRC, 0, 10, sending_string);
+    if (enable_rwug) {
+        sprintf(sending_string, "Sending data to RWUG server at %s:%d.", ip_address, RWUG_PORT);
+        OSScreenPutFontEx(SCREEN_DRC, 0, line++, sending_string);
+    }
+    if (enable_dsu) {
+        sprintf(sending_string, "Listening to DSU requests on %d.", DSU_PORT);
+        OSScreenPutFontEx(SCREEN_DRC, 0, line++, sending_string);
+    }
+
     OSScreenPutFontEx(SCREEN_DRC, 0, 16, "HOME - Exit");
 
     DCFlushRange(screenBufferTV, screenBufferSizeTV);
@@ -164,8 +174,6 @@ int main() {
 
 
 
-    const bool enable_rwug = mode == 0 || mode == 2;
-    const bool enable_dsu = mode == 0 || mode == 1;
     struct timeval current_time;
 
     while (WHBProcIsRunning()) {

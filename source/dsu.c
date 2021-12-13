@@ -4,6 +4,8 @@
 #include <string.h>
 #include <zlib.h>
 
+#include "byte_swap.h"
+
 // This DSU implementation doesn't fully follow the specifications for the sake of efficiency.
 // If this causes any issues with DSU clients, we should send information about all requested controllers
 // and properly handle data requests as the specification suggests. Incoming requests are not fully validated.
