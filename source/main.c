@@ -183,14 +183,11 @@ int main() {
         VPADTouchData touchpad_data;
         VPADGetTPCalibratedPointEx(VPAD_CHAN_0, VPAD_TP_854X480, &touchpad_data, &pad_data.tpNormal);
 
-        if (enable_rwug) {
-            update_rwug(&udp_socket, &pad_data, &touchpad_data, (const struct sockaddr*) &rwug_server_address, rwug_server_address_size);
-        }
+        gettimeofday(&current_time, NULL);
+        uint64_t microseconds = current_time.tv_sec * 1000000 + current_time.tv_usec;
 
-        if (enable_dsu) {
-            gettimeofday(&current_time, NULL);
-            update_dsu(&udp_socket, current_time.tv_sec * 1000000 + current_time.tv_usec, &pad_data, &touchpad_data);
-        }
+        if (enable_rwug) update_rwug(&udp_socket, &pad_data, &touchpad_data, &microseconds, (const struct sockaddr*) &rwug_server_address, rwug_server_address_size);
+        if (enable_dsu) update_dsu(&udp_socket, &microseconds, &pad_data, &touchpad_data);
 
         OSSleepTicks(OSMicrosecondsToTicks(DATA_UPDATE_RATE));
     }

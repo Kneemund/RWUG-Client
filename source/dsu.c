@@ -200,7 +200,7 @@ uint8_t pack_controller_data(uint8_t* packet, uint32_t packet_count, uint64_t ti
     memcpy(&packet[80], &accelerometerY, sizeof(accelerometerY));
     memcpy(&packet[84], &accelerometerZ, sizeof(accelerometerZ));
 
-    // Accelerometer data (4 bytes each).
+    // Gyroscope data (4 bytes each).
     memcpy(&packet[88], &gyroscopePitch, sizeof(gyroscopePitch));
     memcpy(&packet[92], &gyroscopeYaw, sizeof(gyroscopeYaw));
     memcpy(&packet[96], &gyroscopeRoll, sizeof(gyroscopeRoll));
@@ -218,7 +218,7 @@ uint8_t incoming_packet[INCOMING_BUFFER_SIZE];
 struct sockaddr_in sender;
 socklen_t sender_size = sizeof(sender);
 
-void update_dsu(int* socket, uint64_t timestamp, VPADStatus* pad, VPADTouchData* touchpad) {
+void update_dsu(int* socket, uint64_t* timestamp, VPADStatus* pad, VPADTouchData* touchpad) {
     // This operation is non-blocking due to MSG_DONTWAIT.
     // request_length is < 0 if recvfrom() would block.
     ssize_t request_length = recvfrom(*socket, incoming_packet, INCOMING_BUFFER_SIZE, MSG_DONTWAIT, (struct sockaddr*) &sender, &sender_size);
@@ -242,13 +242,13 @@ void update_dsu(int* socket, uint64_t timestamp, VPADStatus* pad, VPADTouchData*
 
             // Controller Data Request
             case 0x02: {
-                last_data_requested = timestamp;
+                last_data_requested = *timestamp;
                 break;
             }
         }
     }
 
-    if (timestamp - last_data_requested < DATA_REQUEST_TIMEOUT) {
+    if (*timestamp - last_data_requested < DATA_REQUEST_TIMEOUT) {
         float accelerometerX = bswap32f(-pad->accelorometer.acc.x);
         float accelerometerY = bswap32f( pad->accelorometer.acc.y);
         float accelerometerZ = bswap32f(-pad->accelorometer.acc.z);
@@ -258,7 +258,7 @@ void update_dsu(int* socket, uint64_t timestamp, VPADStatus* pad, VPADTouchData*
         float gyroscopeRoll  = bswap32f( pad->gyro.z * 360.0);
 
         uint8_t packet_size = pack_controller_data(
-            outgoing_packet, bswap32u(outgoing_packet_count), bswap64u(timestamp),
+            outgoing_packet, bswap32u(outgoing_packet_count), bswap64u(*timestamp),
             accelerometerX, accelerometerY, accelerometerZ,
             gyroscopePitch, gyroscopeYaw, gyroscopeRoll,
             touchpad->touched, bswap16u(touchpad->x), bswap16u(touchpad->y),
