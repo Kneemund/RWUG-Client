@@ -1,0 +1,7 @@
+#define DRC_WIDTH 896
+#define DRC_HEIGHT 480
+
+#define DSU_PORT 26760
+#define RWUG_PORT 4242
+
+#define DATA_UPDATE_RATE 10000
