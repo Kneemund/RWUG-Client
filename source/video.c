@@ -1,6 +1,9 @@
 #include <whb/log_udp.h>
 #include <whb/log.h>
 
+#include <arpa/inet.h>
+#include <nn/ac.h>
+
 #include "video.h"
 
 #include <sys/time.h>
@@ -15,11 +18,20 @@ int video_open(struct VideoState* state, const char* file) {
         return -1;
     }
 
-    // uncomment for RTP/UDP
-    // av_dict_set(&state->av_dictionary, "protocol_whitelist", "file,udp,rtp", 0);
-    // av_dict_set(&state->av_dictionary, "localaddr", "192.168.0.159", 0);
-    // av_dict_set(&state->av_dictionary, "localport", "6100", 0);
-    // av_dict_set(&state->av_dictionary, "buffer_size", "32768", 0);
+    struct in_addr in;
+    ACGetAssignedAddress((uint32_t*) &in.s_addr);
+
+    char assigned_address[64];
+    if (!inet_ntop(AF_INET, &in, assigned_address, 64)) {
+        WHBLogPrint("Failed to open video: couldn't resolve assigned IP address.");
+    }
+
+    WHBLogPrint(assigned_address);
+
+    av_dict_set(&state->av_dictionary, "protocol_whitelist", "file,udp,rtp", 0);
+    av_dict_set(&state->av_dictionary, "localaddr", assigned_address, 0);
+    av_dict_set(&state->av_dictionary, "localport", "6100", 0);
+    av_dict_set(&state->av_dictionary, "buffer_size", "32768", 0);
 
     int res = avformat_open_input(&state->av_format_context, file, NULL, &state->av_dictionary);
     if (res < 0) {
