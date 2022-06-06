@@ -4,7 +4,7 @@
 #include <libswscale/swscale.h>
 
 struct VideoState {
-    int64_t start_microseconds;
+    uint64_t start_microseconds;
     AVRational time_base;
     int video_stream_index;
 

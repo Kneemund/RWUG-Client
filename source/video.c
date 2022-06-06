@@ -9,8 +9,8 @@
 #include <sys/time.h>
 #include "common.h"
 
-int video_open(struct VideoState* state, const char* file) {
-    av_log_set_level(AV_LOG_DEBUG);
+int video_open(struct VideoState* state, const char* path) {
+    // av_log_set_level(AV_LOG_INFO);
 
     state->av_format_context = avformat_alloc_context();
     if (!state->av_format_context) {
@@ -18,29 +18,36 @@ int video_open(struct VideoState* state, const char* file) {
         return -1;
     }
 
-    struct in_addr in;
-    ACGetAssignedAddress((uint32_t*) &in.s_addr);
+    // struct in_addr in;
+    // ACGetAssignedAddress((uint32_t*) &in.s_addr);
 
-    char assigned_address[64];
-    if (!inet_ntop(AF_INET, &in, assigned_address, 64)) {
-        WHBLogPrint("Failed to open video: couldn't resolve assigned IP address.");
-    }
+    // char assigned_address[64];
+    // if (!inet_ntop(AF_INET, &in, assigned_address, 64)) {
+    //     WHBLogPrint("Failed to open video: couldn't resolve assigned IP address.");
+    // }
 
-    WHBLogPrint(assigned_address);
+    // WHBLogPrint(assigned_address);
 
-    av_dict_set(&state->av_dictionary, "protocol_whitelist", "file,udp,rtp", 0);
-    av_dict_set(&state->av_dictionary, "localaddr", assigned_address, 0);
-    av_dict_set(&state->av_dictionary, "localport", "6100", 0);
-    av_dict_set(&state->av_dictionary, "buffer_size", "32768", 0);
+    // av_dict_set(&state->av_dictionary, "localaddr", assigned_address, 0);
+    // av_dict_set(&state->av_dictionary, "buffer_size", "42768", 0);
 
-    int res = avformat_open_input(&state->av_format_context, file, NULL, &state->av_dictionary);
+    int res = avformat_open_input(&state->av_format_context, path, NULL, &state->av_dictionary);
     if (res < 0) {
         WHBLogPrint("Failed to open video: couldn't open input.");
         WHBLogPrint(av_err2str(res));
         return -1;
     }
 
+    state->av_format_context->max_analyze_duration = 50000;
+
     WHBLogPrint("Opened avformat input.");
+
+    res = avformat_find_stream_info(state->av_format_context, NULL);
+    if (res < 0) {
+        WHBLogPrint("Failed to open video: couldn't find stream info.");
+        WHBLogPrint(av_err2str(res));
+        return -1;
+    }
 
     state->video_stream_index = -1;
     AVCodecParameters* av_codec_parameters;
@@ -83,37 +90,35 @@ int video_open(struct VideoState* state, const char* file) {
     state->av_frame = av_frame_alloc();
     if (!state->av_frame) {
         WHBLogPrint("Failed to open video: couldn't allocate frame.");
-        return -1; // couldn't allocate frame
+        return -1;
     }
 
     state->av_packet = av_packet_alloc();
     if (!state->av_packet) {
         WHBLogPrint("Failed to open video: couldn't allocate packet.");
-        return -1; // couldn't allocate packet
+        return -1;
     }
 
     return 0;
 }
 
-int video_next_frame(struct VideoState* state, uint8_t* buffer, int64_t* pts) {
+int video_next_frame(struct VideoState* state, uint8_t* buffer, int64_t* presentationTS) {
     int res;
 
-    WHBLogPrint("Reading frame...");
     while (av_read_frame(state->av_format_context, state->av_packet) >= 0) {
         if (state->av_packet->stream_index != state->video_stream_index) continue;
-        WHBLogPrint("Found frame!");
 
         res = avcodec_send_packet(state->av_codec_context, state->av_packet);
         if (res < 0) {
-            printf("failed to decode packet: %s\n", av_err2str(res));
-            return -1; // failed to decode packet
+            WHBLogPrintf("Failed to decode packet: %s", av_err2str(res));
+            return -1;
         }
 
         res = avcodec_receive_frame(state->av_codec_context, state->av_frame);
         if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) {
             continue;
         } else if (res < 0) {
-            printf("failed to receive frame: %s\n", av_err2str(res));
+            WHBLogPrintf("Failed to receive frame: %s", av_err2str(res));
             return -1;
         }
 
@@ -121,7 +126,7 @@ int video_next_frame(struct VideoState* state, uint8_t* buffer, int64_t* pts) {
         break;
     }
 
-    *pts = state->av_frame->pts;
+    *presentationTS = state->av_frame->best_effort_timestamp;
 
     if (!state->start_microseconds) {
         // first frame

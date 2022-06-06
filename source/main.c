@@ -206,8 +206,12 @@ int main() {
 
 
 
-    char video_path[128];
-    sprintf(video_path, "%s/wiiu/apps/RWUG/video.mp4", WHBGetSdCardMountPath());
+    // char video_path[128];
+    // sprintf(video_path, "%s/wiiu/apps/RWUG/video.mp4", WHBGetSdCardMountPath());
+
+    // e.g. tcp://192.168.0.11:6100
+    char video_path[32];
+    sprintf(video_path, "tcp://%s:6100", ip_address);
 
     WHBLogPrint("Opening video...");
 
@@ -275,11 +279,8 @@ int main() {
         }
 
         double presentation_seconds = presentationTS * (double) video_state.time_base.num / (double) video_state.time_base.den;
-        double sync_sleep_microseconds = 1000000 * presentation_seconds - (microseconds - video_state.start_microseconds);
-        if (sync_sleep_microseconds > 0) {
-            WHBLogPrint("Sleeping...");
-            OSSleepTicks(OSMicrosecondsToTicks(sync_sleep_microseconds));
-        }
+        double sync_sleep_microseconds = 1000000.0 * presentation_seconds - ((double) (microseconds - video_state.start_microseconds));
+        if (sync_sleep_microseconds > 0) OSSleepTicks(OSMicrosecondsToTicks(sync_sleep_microseconds));
 
         ScreenFlip();
 
