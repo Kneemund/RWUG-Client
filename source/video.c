@@ -31,6 +31,8 @@ int video_open(struct VideoState* state, const char* path) {
     // av_dict_set(&state->av_dictionary, "localaddr", assigned_address, 0);
     // av_dict_set(&state->av_dictionary, "buffer_size", "42768", 0);
 
+    av_dict_set(&state->av_dictionary, "tcp_nodelay", "1", 0);
+
     int res = avformat_open_input(&state->av_format_context, path, NULL, &state->av_dictionary);
     if (res < 0) {
         WHBLogPrint("Failed to open video: couldn't open input.");
@@ -38,9 +40,9 @@ int video_open(struct VideoState* state, const char* path) {
         return -1;
     }
 
-    state->av_format_context->max_analyze_duration = 50000;
-
     WHBLogPrint("Opened avformat input.");
+
+    state->av_format_context->max_analyze_duration = 50000;
 
     res = avformat_find_stream_info(state->av_format_context, NULL);
     if (res < 0) {
