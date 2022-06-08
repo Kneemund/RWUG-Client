@@ -10,6 +10,8 @@
 #define RWUG_OUT_SIZE 58
 #define RWUG_IN_SIZE 4
 
+#define FORCE_FEEDBACK_MAX_PATTERN_SIZE 120
+
 void pack_gamepad_data(VPADStatus* pad, VPADTouchData* touchpad, uint8_t* packet, uint64_t* microseconds) {
     float accelerometerX = bswap32f(-pad->accelorometer.acc.x);
     float accelerometerY = bswap32f( pad->accelorometer.acc.y);
@@ -60,27 +62,42 @@ void pack_gamepad_data(VPADStatus* pad, VPADTouchData* touchpad, uint8_t* packet
     memcpy(&packet[54], &stickRY, sizeof(stickLX));
 }
 
+static uint16_t force_feedback_length = 0;
+
 void handle_force_feedback(int* socket) {
+    /*
+        1 - packet type
+        2 - strength
+        3 - length in ms (2 bytes)
+        4 - length in ms (2 bytes)
+    */
+
     uint8_t incoming_packet[RWUG_IN_SIZE];
     while (recv(*socket, incoming_packet, RWUG_IN_SIZE, MSG_DONTWAIT) > 0) {
-        if (incoming_packet[0] == RWUG_PLAY) {
-            uint16_t length;
-            memcpy(&length, &incoming_packet[2], sizeof(uint16_t));
-            length = bswap16u(length) * (120.0 / 1000.0); // uinput length in ms, VPAD length of 120 is about 1000ms
+        if (incoming_packet[0] == RWUG_STOP || incoming_packet[1] < 10) {
+            // stop packet or very low strength (3% and below)
+            force_feedback_length = 0;
 
             VPADStopMotor(VPAD_CHAN_0);
+        } else if (incoming_packet[0] == RWUG_PLAY) {
+            // play packet and normal strength
+            memcpy(&force_feedback_length, &incoming_packet[2], sizeof(uint16_t));
+            force_feedback_length = bswap16u(force_feedback_length) * (120.0 / 1000.0); // uinput length in ms, VPAD length of 120 is about 1000ms
 
-            uint8_t pattern[120];
-            memset(&pattern[0], incoming_packet[1], 120); // incoming_packet[1] == strength
-
-            while (length > 0) {
-                uint8_t step = length < 120 ? length : 120;
-                VPADControlMotor(VPAD_CHAN_0, pattern, step);
-                length -= step;
-            }
-        } else if (incoming_packet[0] == RWUG_STOP) {
             VPADStopMotor(VPAD_CHAN_0);
         }
+    }
+
+    if (VPADBASEGetMotorOnRemainingCount(VPAD_CHAN_0) == 0 && force_feedback_length > 0) {
+        // motor not enabled and force feedback queued
+
+        uint8_t step = force_feedback_length < FORCE_FEEDBACK_MAX_PATTERN_SIZE ? force_feedback_length : FORCE_FEEDBACK_MAX_PATTERN_SIZE;
+
+        uint8_t pattern[step];
+        memset(&pattern[0], incoming_packet[1], step);
+
+        VPADControlMotor(VPAD_CHAN_0, pattern, step);
+        force_feedback_length -= step;
     }
 }
 

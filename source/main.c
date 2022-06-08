@@ -1,22 +1,19 @@
 #include <whb/proc.h>
 #include <whb/sdcard.h>
+#include <whb/log_udp.h>
+#include <whb/log.h>
+#include <vpad/input.h>
 #include <coreinit/screen.h>
 #include <coreinit/cache.h>
-#include <coreinit/thread.h>
 #include <malloc.h>
-#include <string.h>
-#include <stdio.h>
 #include <sys/time.h>
 #include <sys/iosupport.h>
 
-#include <whb/log_udp.h>
-#include <whb/log.h>
-
 #include "configuration.h"
 #include "udp_socket.h"
-#include "dsu.h"
-#include "rwug.h"
 #include "video.h"
+#include "thread.h"
+#include "input_server.h"
 #include "common.h"
 
 // SOUND: https://github.com/xhp-creations/WUP-Installer-GX2/blob/5105b58fa9ecb09add37d78eb1f1dd3976d21532/src/sounds/Voice.h
@@ -196,18 +193,61 @@ int main() {
     char ip_address[16];
     sprintf(ip_address, "%d.%d.%d.%d", raw_ip_address[0], raw_ip_address[1], raw_ip_address[2], raw_ip_address[3]);
 
-    const bool enable_rwug = mode == 0 || mode == 2;
-    const bool enable_dsu  = mode == 0 || mode == 1;
 
-    int udp_socket = init_udp_socket(DSU_PORT);
+
+    struct InputServerArguments input_server_arguments = {
+        .enable_rwug = mode == 0 || mode == 2,
+        .enable_dsu = mode == 0 || mode == 1,
+        .socket = init_udp_socket(DSU_PORT)
+    };
+
+    if (input_server_arguments.socket < 0) {
+        WHBLogPrint("Creating UDP socket failed.");
+
+        OSScreenShutdown();
+        free(screenBufferTV);
+        free(screenBufferDRC);
+
+        VPADShutdown();
+        WHBUnmountSdCard();
+        WHBProcShutdown();
+        WHBLogUdpDeinit();
+
+        return -1;
+    }
 
     OSScreenClearBufferEx(SCREEN_TV, 0x00000000);
     OSScreenClearBufferEx(SCREEN_DRC, 0x00000000);
 
 
 
-    // char video_path[128];
-    // sprintf(video_path, "%s/wiiu/apps/RWUG/video.mp4", WHBGetSdCardMountPath());
+    save_configuration(configuration_path, ip_address, mode);
+
+    memset(&input_server_arguments.address, 0, sizeof(struct sockaddr_in));
+    input_server_arguments.address.sin_family = AF_INET;
+    input_server_arguments.address.sin_port = htons(RWUG_PORT);
+    inet_pton(AF_INET, ip_address, &input_server_arguments.address.sin_addr);
+
+
+    OSThread* input_server_thread;
+    if (create_thread(&input_server_thread, &input_server, (void*) &input_server_arguments) != 0) {
+        WHBLogPrint("Failed to create input server thread.");
+
+        destroy_udp_socket(&input_server_arguments.socket);
+
+        OSScreenShutdown();
+        free(screenBufferTV);
+        free(screenBufferDRC);
+
+        VPADShutdown();
+        WHBUnmountSdCard();
+        WHBProcShutdown();
+        WHBLogUdpDeinit();
+
+        return -1;
+    }
+
+
 
     // e.g. tcp://192.168.0.11:6100
     char video_path[32];
@@ -218,6 +258,20 @@ int main() {
     struct VideoState video_state = {};
     if (video_open(&video_state, video_path) < 0) {
         WHBLogPrint("Opening video failed.");
+
+        close_input_server(input_server_thread);
+        video_close(&video_state);
+        destroy_udp_socket(&input_server_arguments.socket);
+
+        OSScreenShutdown();
+        free(screenBufferTV);
+        free(screenBufferDRC);
+
+        VPADShutdown();
+        WHBUnmountSdCard();
+        WHBProcShutdown();
+        WHBLogUdpDeinit();
+
         return -1;
     }
 
@@ -225,56 +279,30 @@ int main() {
 
 
 
-    print_header(SCREEN_DRC);
-
-    uint8_t line = 9;
-    char sending_string[64];
-    if (enable_rwug) {
-        sprintf(sending_string, "Sending data to RWUG server at %s:%d.", ip_address, RWUG_PORT);
-        OSScreenPutFontEx(SCREEN_DRC, 0, line++, sending_string);
-    }
-    if (enable_dsu) {
-        sprintf(sending_string, "Listening to DSU requests on %d.", DSU_PORT);
-        OSScreenPutFontEx(SCREEN_DRC, 0, line++, sending_string);
-    }
-
-    OSScreenPutFontEx(SCREEN_DRC, 0, 16, "HOME - Exit");
-
-    ScreenFlip();
-
-    save_configuration(configuration_path, ip_address, mode);
-
-    struct sockaddr_in rwug_server_address;
-    socklen_t rwug_server_address_size = sizeof(rwug_server_address);
-    memset(&rwug_server_address, 0, rwug_server_address_size);
-
-    rwug_server_address.sin_family = AF_INET;
-    rwug_server_address.sin_port = htons(RWUG_PORT);
-    inet_pton(AF_INET, ip_address, &rwug_server_address.sin_addr);
-
-
-    WHBLogPrint("Entering main loop...");
-
     struct timeval current_time;
-
     while (WHBProcIsRunning()) {
-        VPADStatus pad_data;
-        VPADRead(VPAD_CHAN_0, &pad_data, 1, NULL);
-
-        VPADTouchData touchpad_data;
-        VPADGetTPCalibratedPointEx(VPAD_CHAN_0, VPAD_TP_854X480, &touchpad_data, &pad_data.tpNormal);
-
         gettimeofday(&current_time, NULL);
         uint64_t microseconds = current_time.tv_sec * 1000000 + current_time.tv_usec;
-
-        if (enable_rwug) update_rwug(&udp_socket, &pad_data, &touchpad_data, &microseconds, (const struct sockaddr*) &rwug_server_address, rwug_server_address_size);
-        if (enable_dsu) update_dsu(&udp_socket, &microseconds, &pad_data, &touchpad_data);
 
         struct ScreenBuffer workBuffer = BUFFERS[SCREEN_DRC][currentBuffer];
 
         int64_t presentationTS;
         if (video_next_frame(&video_state, (uint8_t*) workBuffer.image, &presentationTS) < 0) {
-            WHBLogPrint("Failed to get next frame.");
+            WHBLogPrint("Failed to get frame.");
+
+            close_input_server(input_server_thread);
+            video_close(&video_state);
+            destroy_udp_socket(&input_server_arguments.socket);
+
+            OSScreenShutdown();
+            free(screenBufferTV);
+            free(screenBufferDRC);
+
+            VPADShutdown();
+            WHBUnmountSdCard();
+            WHBProcShutdown();
+            WHBLogUdpDeinit();
+
             return -1;
         }
 
@@ -283,14 +311,11 @@ int main() {
         if (sync_sleep_microseconds > 0) OSSleepTicks(OSMicrosecondsToTicks(sync_sleep_microseconds));
 
         ScreenFlip();
-
-        // OSSleepTicks(OSMicrosecondsToTicks(DATA_UPDATE_RATE));
     }
 
-
+    close_input_server(input_server_thread);
     video_close(&video_state);
-
-    destroy_udp_socket(&udp_socket);
+    destroy_udp_socket(&input_server_arguments.socket);
 
     OSScreenShutdown();
     free(screenBufferTV);
